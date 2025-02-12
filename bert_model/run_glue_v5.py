@@ -1,9 +1,11 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import datetime
 from datasets import load_dataset
 import wandb
 import torch
 import logging
-import os
+
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional, List, Union
 os.environ["WANDB_LOG_MODEL"] = "false" # log all model checkpoints
