@@ -95,12 +95,14 @@ class LorettaRepModel(torch.nn.Module):
         self.forward = self.model.forward
 
     def _find_and_replace(self):
+        # Check if the model is loaded in 8-bit mode
         loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
         if loaded_in_8bit and not is_bnb_available():
             raise ImportError(
                 "To use Lora with 8-bit quantization, please install the `bitsandbytes` package. "
                 "You can install it with `pip install bitsandbytes`."
             )
+        # Initialize flags and arguments
         is_target_modules_in_base_model = False
         is_hf_device_map_available = hasattr(self.model, "hf_device_map")
         kwargs = {
@@ -111,8 +113,10 @@ class LorettaRepModel(torch.nn.Module):
             "merge_weights": (self.peft_config.merge_weights or self.peft_config.inference_mode)
             and not is_hf_device_map_available,
         }
+        # Iterate over all named modules in the model
         key_list = [key for key, _ in self.model.named_modules()]
         for key in key_list:
+            # Check if the module name matches the target modules
             if isinstance(self.peft_config.target_modules, str):
                 target_module_found = re.fullmatch(self.peft_config.target_modules, key)
             else:
@@ -122,6 +126,7 @@ class LorettaRepModel(torch.nn.Module):
                     is_target_modules_in_base_model = True
                 parent, target, target_name = self._get_submodules(key)
                 bias = target.bias is not None
+                # Handle 8-bit quantization
                 if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
                     kwargs.update(
                         {
@@ -136,8 +141,10 @@ class LorettaRepModel(torch.nn.Module):
                     else:
                         kwargs.update({"enable_lora": self.peft_config.enable_lora})
                         new_module = MergedLinear8bitLt(target.in_features, target.out_features, bias=bias, **kwargs)
+                # Handle standard Linear modules
                 elif isinstance(target, torch.nn.Linear) and self.peft_config.enable_lora is None:
                     new_module = Linear(target.in_features, target.out_features, tensor_rank=self.peft_config.tensor_rank, bias=bias, **kwargs)
+                # Handle other modules with LoRA enabled、
                 elif self.peft_config.enable_lora is not None:
                     kwargs.update({"enable_lora": self.peft_config.enable_lora})
                     if isinstance(target, Conv1D):
@@ -153,7 +160,9 @@ class LorettaRepModel(torch.nn.Module):
                             )
                             kwargs["fan_in_fan_out"] = self.peft_config.fan_in_fan_out = False
                     new_module = MergedLinear(in_features, out_features, tensor_rank=self.peft_config.tensor_rank, bias=bias, **kwargs)
+                # Replace the target module with the new module
                 self._replace_module(parent, target_name, new_module, target)
+        # Raise an error if no target modules are found
         if not is_target_modules_in_base_model:
             raise ValueError(
                 f"Target modules {self.peft_config.target_modules} not found in the base model. "
