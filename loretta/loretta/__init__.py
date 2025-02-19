@@ -27,6 +27,8 @@ from .tuners import (
     LorettaAdpModel,
     LorettaRepConfig,
     LorettaRepModel,
+    VcConfig,
+    VcModel
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,

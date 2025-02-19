@@ -28,7 +28,7 @@ from transformers import PreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
-from .tuners import LorettaRepModel, LorettaAdpModel, PrefixEncoder, PromptEmbedding, PromptEncoder
+from .tuners import LorettaRepModel, LorettaAdpModel, PrefixEncoder, PromptEmbedding, PromptEncoder,VcModel
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     WEIGHTS_NAME,
@@ -80,6 +80,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.base_model = LorettaRepModel(peft_config, model)
             elif self.peft_config.peft_type == PeftType.BOTTLENECK:
                 self.base_model = LorettaAdpModel(peft_config, model)
+            elif self.peft_config.peft_type == PeftType.VC:
+                self.base_model = VcModel(peft_config, model)
         if getattr(self.peft_config, "modules_to_save", None) is not None:
             self.modules_to_save = self.peft_config.modules_to_save
             _set_trainable(self)

@@ -11,8 +11,9 @@ export HF_ENDPOINT=https://hf-mirror.com
 # Test with deberta-base model (use SST2 dataset by default, change the input for $TASK for other tasks)
 #MODEL=microsoft/deberta-base TASK=SST2 MODE=ft EPOCH=10 BS=8 LR=1e-6 DEVICE=7 bash finetune.sh
 # MODEL=microsoft/deberta-base TASK=SST2 MODE=loretta_adp EPOCH=10 BS=8 LR=1e-4 DEVICE=7 bash finetune.sh
-MODEL=microsoft/deberta-base TASK=SST2 MODE=loretta_rep EPOCH=10 BS=8 LR=1e-4 DEVICE=7 bash finetune.sh
+# MODEL=microsoft/deberta-base TASK=SST2 MODE=loretta_rep EPOCH=10 BS=8 LR=1e-4 DEVICE=7 bash finetune.sh
 # MODEL=microsoft/deberta-base TASK=SST2 MODE=lora EPOCH=10 BS=8 LR=1e-4 DEVICE=0 bash finetune.sh
+MODEL=microsoft/deberta-base TASK=SST2 MODE=VC EPOCH=10 BS=8 LR=1e-4 DEVICE=0 bash finetune.sh
 #MODEL=microsoft/deberta-base TASK=SST2 MODE=adapters EPOCH=10 BS=8 LR=1e-4 DEVICE=7 bash finetune.sh
 #MODEL=microsoft/deberta-base TASK=SST2 MODE=prompt EPOCH=10 BS=8 LR=1e-4 DEVICE=7 bash finetune.sh
 #MODEL=microsoft/deberta-base TASK=SST2 MODE=ia3 EPOCH=10 BS=8 LR=1e-4 DEVICE=7 bash finetune.sh

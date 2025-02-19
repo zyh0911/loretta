@@ -28,3 +28,4 @@ from .other import (
     transpose,
 )
 from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict
+from .replace import decompose_weight

@@ -1,3 +1,5 @@
 bert_model/error.txt
 bert_model/outoput_test.txt
 bert_model/wandb/*
+bert_model/output/*
+bert_model/job.*.out

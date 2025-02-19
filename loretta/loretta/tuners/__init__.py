@@ -21,3 +21,4 @@ from .loretta_adp import LorettaAdpConfig, LorettaAdpModel
 from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparameterizationType
 from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
 from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
+from .vc import VcConfig, VcModel

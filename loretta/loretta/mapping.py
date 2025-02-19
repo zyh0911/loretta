@@ -20,7 +20,7 @@ from .peft_model import (
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
 )
-from .tuners import LorettaRepConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig, LorettaAdpConfig
+from .tuners import LorettaRepConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig, LorettaAdpConfig, VcConfig
 from .utils import PromptLearningConfig
 
 
