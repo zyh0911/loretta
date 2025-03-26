@@ -4,7 +4,7 @@ import numpy as np
 import torch.nn as nn
 from .low_rank_tensors import TensorTrain, TensorTrainMatrix
 from .utils import config_class, quantize, TT_forward_quant
-
+from ..utils import decompose_weight
 
 class wrapped_linear_layers(nn.Module):
     def __init__(self,in_features,out_features,bias=True,tensorized=False,config=None):
@@ -184,4 +184,61 @@ class TensorizedLinear_module(nn.Module):
         return output
 
 
-
+class vc_adapter(nn.Module):
+    def __init__(self, m, n, k):
+        """
+        参数:
+        m: 输入向量第二个维度
+        n: 输出向量第二个维度
+        k: n的除数, 用于确定中间层维度
+        init_method: 参数初始化方法
+        """
+        super(vc_adapter, self).__init__()
+        
+        # 确保维度符合要求
+        assert m % 4 == 0, "M must be divisible by 4"
+        assert n % k == 0, "N must be divisible by k"
+        
+        m_div_4 = m // 4
+        n_div_k = n // k
+        
+        # 初始化两层参数
+        self.layer1 = nn.Parameter(torch.empty(m_div_4, 4, n_div_k))
+        self.layer2 = nn.Parameter(torch.empty(m_div_4, n_div_k, n))
+        
+        nn.init.xavier_uniform_(self.layer1)
+        nn.init.xavier_uniform_(self.layer2)
+        
+        self.layer2.requires_grad = False
+        
+        self.m = m
+        self.n = n
+    def init_weight():
+        pass
+    
+    def forward(self, x):
+        """
+        前向传播函数
+        
+        参数:
+        x: 输入张量，大小为 (s, m)
+        
+        返回:
+        输出张量，大小为 (s, n)
+        """
+        s, m = x.shape
+        assert m == self.m, f"输入维度不匹配：期望 {self.m}，得到 {m}"
+        
+        m_div_4 = m // 4
+        
+        # 将输入reshape为(m/4, s, 4)
+        x_reshaped = x.reshape(s, m_div_4, 4).permute(1, 0, 2)
+        
+        # 第一层计算: (m/4, s, 4) × (m/4, 4, n/k) -> (m/4, s, n/k)
+        intermediate = torch.bmm(x_reshaped, self.layer1)
+        
+        # 第二层计算: (m/4, s, n/k) × (m/4, n/k, n) -> (m/4, s, n)
+        output = torch.bmm(intermediate, self.layer2)
+        
+        
+        return output.sum(dim=0)

@@ -11,8 +11,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
+from ..tensor_layers.layers import vc_adapter
 from ..utils import PeftConfig, PeftType, transpose
-from ..utils import decompose_weight
 
 def is_bnb_available():
     return importlib.util.find_spec("bitsandbytes") is not None
@@ -221,17 +221,6 @@ class vcModel(torch.nn.Module):
     def disable_adapter_layers(self):
         self._set_adapter_layers(enabled=False)
 
-# Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
-# and modified to work with PyTorch FSDP
-
-
-#  ------------------------------------------------------------------------------------------
-#  Copyright (c) Microsoft Corporation. All rights reserved.
-#  Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
-#  ------------------------------------------------------------------------------------------
-
-
-# had to adapt it for `lora_only` to work
 def mark_vc_as_trainable(model: nn.Module, bias: str = "none") -> None:
     for n, p in model.named_parameters():
         if "lora_" not in n:
@@ -258,52 +247,8 @@ class VCLayer(nn.Module):
         self.out_features = out_features
         self.vector_length = vector_length
         self.k = k
-        
     
-
-class Special_linear_Layer(nn.Linear,nn.Module):
-    def __init__(self,          
-                input_feature,
-                out_features, 
-                vector_length, 
-                k,
-                bias=True):
-        super(Special_linear_Layer, self).__init__()
-        self.input_feature = input_feature
-        self.out_features = out_features
-        self.vector_length = vector_length
-        self.k = k
-
-        weight1,weight2=decompose_weight(nn.Linear.weight,vector_length)
-        self.layer1 = nn.Parameter(weight1)
-        self.layer2 = nn.Parameter(weight2)
-
-        # self.layer1 = nn.Parameter(torch.Tensor(input_feature, out_features/k))
-        # self.layer2 = nn.Parameter(torch.Tensor(out_features/k*input_feature/vector_length, out_features))
-        if bias == False:
-            self.bias = 0
-        else:
-            self.bias = nn.Linear.bias
-
-    def get_weight(self):
-        return self.layer1, self.layer2
-    
-    def forward(self, x: torch.Tensor):
-        s, m = x.shape  
-        m, n =self.layer1.shape  
-        x.view(s, m // self.vector_length, self.vector_length).permute(1, 0, 2)
-        self.layer1.view(s, m // self.vector_length, self.out_features/self.k).permute(1, 0, 2)  
-        self.layer2.view(s, self.input_feature/self.vector_length,self.out_features).permute(1, 0, 2)  
-        result=torch.matmul(x, self.layer1)
-        result= torch.matmul(result, self.layer2)
-        result = result.sum(dim=0) +self.bias
-        self.weight =result
-        return result
-    
-
-
 class Linear(nn.Linear):
-    # Lora implemented in a dense layer
     def __init__(
         self,
         in_features: int,
@@ -313,155 +258,22 @@ class Linear(nn.Linear):
         **kwargs,
     ):
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
-    
-        self.slayer = Special_linear_Layer(nn.Linear,out_features, vector_length, k)
-        self.sigma = 0.99
-        self.weight.requires_grad = False    
+        super().__init__()
+        self.slayer = vc_adapter(out_features, vector_length, k)  
+        
+    def init_weight(self):
+        self.slayer.init_weight()
 
-    def update_sigma(self, current_step: int, total_steps: int):
-        self.sigma = max(0, 0.99 * (1 - current_step / total_steps))
+    def set_parameters(self):
+        nn.Linear.reset_parameters(self)
 
     def train(self, mode: bool = True):
-        nn.Linear.train(self, mode)
+        super().train(mode)
         self.slayer.train(mode)
 
     def eval(self):
+        super().eval()
         self.slayer.eval()
 
     def forward(self, x: torch.Tensor):
-        self.slayer.weight = self.sigma * x + (1 - self.sigma) * self.slayer.weight
-        return self.slayer.weight
-
-    
-# if is_bnb_available():
-
-#     class Linear8bitLt(bnb.nn.Linear8bitLt):
-#         # Lora implemented in a dense layer
-#         def __init__(
-#             self,
-#             in_features,
-#             out_features,
-#             **kwargs,
-#         ):
-#             bnb.nn.Linear8bitLt.__init__(
-#                 self,
-#                 in_features,
-#                 out_features,
-#                 bias=kwargs.get("bias", True),
-#                 has_fp16_weights=kwargs.get("has_fp16_weights", True),
-#                 memory_efficient_backward=kwargs.get("memory_efficient_backward", False),
-#                 threshold=kwargs.get("threshold", 0.0),
-#                 index=kwargs.get("index", None),
-#             )
-        
-#             # Actual trainable parameters
-#             if r > 0:
-#                 self.lora_A = nn.Linear(in_features, r, bias=False)
-#                 self.lora_B = nn.Linear(r, out_features, bias=False)
-#                 self.scaling = self.lora_alpha / self.r
-#                 # Freezing the pre-trained weight matrix
-#                 self.weight.requires_grad = False
-#             self.reset_parameters()
-
-#         def reset_parameters(self):
-#             if hasattr(self, "lora_A"):
-#                 # initialize A the same way as the default for nn.Linear and B to zero
-#                 nn.init.kaiming_uniform_(self.lora_A.weight, a=math.sqrt(5))
-#                 nn.init.zeros_(self.lora_B.weight)
-
-#         def forward(self, x: torch.Tensor):
-#             result = super().forward(x)
-
-#             if self.disable_adapters:
-#                 return result
-#             elif self.r > 0:
-#                 if not torch.is_autocast_enabled():
-#                     expected_dtype = result.dtype
-
-#                     if x.dtype != torch.float32:
-#                         x = x.float()
-#                     output = self.lora_B(self.lora_A(self.lora_dropout(x))).to(expected_dtype) * self.scaling
-#                     result += output
-#                 else:
-#                     output = self.lora_B(self.lora_A(self.lora_dropout(x))) * self.scaling
-#                     result += output
-#             return result
-
-#     class MergedLinear8bitLt(bnb.nn.Linear8bitLt, vcLayer):
-#         # Lora implemented in a dense layer
-#         def __init__(
-#             self,
-#             in_features: int,
-#             out_features: int,
-#             r: int = 0,
-#             lora_alpha: int = 1,
-#             lora_dropout: float = 0.0,
-#             enable_lora: List[bool] = [False],
-#             **kwargs,
-#         ):
-#             bnb.nn.Linear8bitLt.__init__(
-#                 self,
-#                 in_features,
-#                 out_features,
-#                 bias=kwargs.get("bias", True),
-#                 has_fp16_weights=kwargs.get("has_fp16_weights", True),
-#                 memory_efficient_backward=kwargs.get("memory_efficient_backward", False),
-#                 threshold=kwargs.get("threshold", 0.0),
-#                 index=kwargs.get("index", None),
-#             )
-#             vcLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, merge_weights=False)
-#             if out_features % len(enable_lora) != 0:
-#                 raise ValueError("The length of enable_lora must divide out_features")
-#             self.enable_lora = enable_lora
-#             # Actual trainable parameters
-#             if r > 0 and any(enable_lora):
-#                 self.lora_A = nn.Linear(in_features, r * sum(enable_lora), bias=False)
-#                 self.lora_B = nn.Conv1d(
-#                     r * sum(enable_lora),
-#                     out_features // len(enable_lora) * sum(enable_lora),
-#                     kernel_size=1,
-#                     groups=2,
-#                     bias=False,
-#                 )
-#                 self.scaling = self.lora_alpha / self.r
-#                 # Freezing the pre-trained weight matrix
-#                 self.weight.requires_grad = False
-#                 # Compute the indices
-#                 self.lora_ind = self.weight.new_zeros((out_features,), dtype=torch.bool).view(len(enable_lora), -1)
-#                 self.lora_ind[enable_lora, :] = True
-#                 self.lora_ind = self.lora_ind.view(-1)
-#             self.reset_parameters()
-
-#         def reset_parameters(self):
-#             if hasattr(self, "lora_A"):
-#                 # initialize A the same way as the default for nn.Linear and B to zero
-#                 nn.init.kaiming_uniform_(self.lora_A.weight, a=math.sqrt(5))
-#                 nn.init.zeros_(self.lora_B.weight)
-
-#         def zero_pad(self, x):
-#             result = x.new_zeros((*x.shape[:-1], self.out_features))
-#             result = result.view(-1, self.out_features)
-#             result[:, self.lora_ind] = x.reshape(
-#                 -1, self.out_features // len(self.enable_lora) * sum(self.enable_lora)
-#             )
-#             return result.view((*x.shape[:-1], self.out_features))
-
-#         def forward(self, x: torch.Tensor):
-#             result = super().forward(x)
-#             if self.disable_adapters:
-#                 return result
-#             elif self.r > 0:
-#                 if not torch.is_autocast_enabled():
-#                     expected_dtype = result.dtype
-#                     if x.dtype != torch.float32:
-#                         x = x.float()
-#                     after_A = self.lora_A(self.lora_dropout(x))
-#                     after_B = self.lora_B(after_A.transpose(-2, -1)).transpose(-2, -1)
-#                     output = self.zero_pad(after_B).to(expected_dtype) * self.scaling
-#                     result += output
-#                 else:
-#                     after_A = self.lora_A(self.lora_dropout(x))
-#                     after_B = self.lora_B(after_A.transpose(-2, -1)).transpose(-2, -1)
-#                     output = self.zero_pad(after_B) * self.scaling
-#                     result += output
-#             return result
+        return self.slayer(x)  
